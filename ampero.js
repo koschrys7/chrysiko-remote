@@ -30,9 +30,19 @@ export const FLAG = { REQUEST: 0x11, SEND: 0x12, ERROR: 0x13, ACK: 0x14, RETRY: 
 // The only requests this page can build. Payload length tells read from write:
 // scene 0 = read, 1 = select; parameter 4 = read, 8 = write. Preset save is not included.
 const ALLOWED = { [READ_CURRENT_PRESET]: [0], [CURRENT_SCENE]: [0, 1], [SLOT_PARAMETER]: [4, 8] };
-export function encodeCommand(address, payload = new Uint8Array(0)) {
+// The editor's native library (HTUSBTools sendMidiMessage) LZO-compresses every non-empty payload by default
+// (connectDevice sets the device's compress flag to 1) and marks writes with flag 0x12 (SEND), reads with 0x11 (REQUEST).
+// For payloads this short, lzo1x_1_compress emits literals only: [17 + n, ...bytes, 0x11, 0x00, 0x00]
+// (checked against liblzo2 in test/lzo-vectors.json). Sending raw payloads made the pedal hang.
+export function lzoLiterals(data) {
+  if (data.length < 1 || data.length > 238) throw new Error("literal-only LZO needs 1..238 bytes");
+  return Uint8Array.from([17 + data.length, ...data, 0x11, 0x00, 0x00]);
+}
+export function encodeCommand(address, payload = new Uint8Array(0), flag = 0x11) {
   if (!(address in ALLOWED) || !ALLOWED[address].includes(payload.length)) throw new Error("command not allowed");
-  return frameMessage(Uint8Array.from([...u32(address), ...u32(payload.length), ...payload]));
+  if (flag !== 0x11 && flag !== 0x12) throw new Error("flag must be REQUEST or SEND");
+  const body = payload.length ? lzoLiterals(payload) : payload;
+  return frameMessage(Uint8Array.from([...u32(address), ...u32(body.length), ...body]), flag);
 }
 const u16 = (v) => [v & 255, (v >> 8) & 255];
 export const readSceneFrames = () => encodeCommand(CURRENT_SCENE);
@@ -40,7 +50,7 @@ export const readParamFrames = (slot, id) => encodeCommand(SLOT_PARAMETER, Uint8
 export function writeParamFrames(slot, id, value) {
   if (!Number.isFinite(value)) throw new Error("value must be finite");
   const f = new Uint8Array(new Float32Array([value]).buffer);
-  return encodeCommand(SLOT_PARAMETER, Uint8Array.from([...u16(slot), ...u16(id), ...f]));
+  return encodeCommand(SLOT_PARAMETER, Uint8Array.from([...u16(slot), ...u16(id), ...f]), 0x12);
 }
 /** {slot, id, value} from a SLOT_PARAMETER reply. */
 export function parseParam(data) {
@@ -51,7 +61,7 @@ export function parseParam(data) {
 export const parseScene = (data) => (data && data.length >= 2 ? data[0] | (data[1] << 8) : null);
 export function writeSceneFrames(scene) {
   if (!Number.isInteger(scene) || scene < 0 || scene > 2) throw new Error("scene must be 0..2");
-  return encodeCommand(CURRENT_SCENE, Uint8Array.of(scene));
+  return encodeCommand(CURRENT_SCENE, Uint8Array.of(scene), 0x12);
 }
 export const locationOf = (index) => `A${String(Math.floor(index / 3)).padStart(2, "0")}-${(index % 3) + 1}`;
 export function indexOf(label) {

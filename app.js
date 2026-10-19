@@ -42,7 +42,23 @@ function portsOf(m) {
   return Object.values(m).filter((p) => p && typeof p === "object" && "name" in p);
 }
 const out = (bytes) => output.send(Array.from(bytes));
-function send(frames, what) { if (!live()) return; for (const f of frames) out(f); log(`→ ${what} ${hexs(frames[0]).slice(0, 64)}…`); }
+// SysEx goes through one queue, one message every 80 ms (the editor's library uses a 60 ms queue timer; codex4ampero
+// waits 80 ms after each write). A queued message with the same key is replaced, so a drag only sends its latest value.
+const sysexQueue = []; let pumpTimer = null;
+function send(frames, what, key = what) {
+  if (!live()) return;
+  const i = sysexQueue.findIndex((m) => m.key === key);
+  const item = { key, frames, what };
+  if (i >= 0) sysexQueue[i] = item; else sysexQueue.push(item);
+  if (!pumpTimer) pump();
+}
+function pump() {
+  const m = sysexQueue.shift();
+  if (!m) { pumpTimer = null; return; }
+  for (const f of m.frames) out(f);
+  log(`→ ${m.what} ${hexs(m.frames[0]).slice(0, 64)}…`);
+  pumpTimer = setTimeout(pump, 80);
+}
 function sendMidi(msgs, what) { if (!live()) return; for (const m of msgs) out(m); log(`→ ${what} ${msgs.map(hexs).join(" ")}`); }
 const needLive = () => { if (!editing()) { toast("Άνοιξε το Live για να ελέγξεις το πετάλι."); return false; } return true; };
 
@@ -56,19 +72,19 @@ function setValue(b, q, v) {
   if (!original.has(k)) original.set(k, sc.values[q.id]);
   if (sc.values[q.id] === v) return;
   sc.values[q.id] = v; pending.set(k, { slot: b.slot, id: q.id, v }); marks.set(k, "wait");
-  if (!flushTimer) flushTimer = setTimeout(flush, 60);
+  if (!flushTimer) flushTimer = setTimeout(flush, 80);
   updateRevert();
 }
 function flush() {
   flushTimer = null;
-  for (const [k, p] of pending) { send(writeParamFrames(p.slot, p.id, p.v), `set slot ${p.slot} param ${p.id} = ${p.v}`); expected.set(k, p.v); }
+  for (const [k, p] of pending) { send(writeParamFrames(p.slot, p.id, p.v), `set slot ${p.slot} param ${p.id} = ${p.v}`, `w:${k}`); expected.set(k, p.v); }
   pending.clear();
 }
 function commit(b, q) { // after a drag, slider or stepper: write now, then read the value back from the pedal
   if (flushTimer) { clearTimeout(flushTimer); flush(); }
   const k = key(b.slot, q.id);
   if (!live()) { marks.set(k, "ok"); refreshRows(); return; }
-  setTimeout(() => send(readParamFrames(b.slot, q.id), `read back slot ${b.slot} param ${q.id}`), 250);
+  setTimeout(() => send(readParamFrames(b.slot, q.id), `read back slot ${b.slot} param ${q.id}`, `r:${k}`), 250);
   setTimeout(() => { if (marks.get(k) === "wait") { marks.set(k, "diff"); refreshRows(); log(`no read-back for ${k}`); } }, 2500);
 }
 function scheduleCommit(b, q) { const k = key(b.slot, q.id); clearTimeout(commitTimers.get(k)); commitTimers.set(k, setTimeout(() => commit(b, q), 350)); }
@@ -448,7 +464,7 @@ function readPreset() {
   if (!output) return;
   const frames = readPresetFrames(); // throws unless identical to the proven read request
   $("read").disabled = true; $("refresh").disabled = true; conn("busy", "Ανάγνωση…");
-  for (const f of frames) { out(f); log("→ read current preset " + hexs(f)); }
+  send(frames, "read current preset", "read-preset");
   clearTimeout(waiting);
   waiting = setTimeout(() => { waiting = null; $("read").disabled = false; $("refresh").disabled = false; conn("ok", "Συνδεδεμένο"); toast("Δεν ήρθε απάντηση σε 4 δευτερόλεπτα. Δοκίμασε ξανά."); }, 4000);
 }
