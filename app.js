@@ -29,8 +29,21 @@ const canEditHere = () => editing() && scene === (deviceScene ?? 0);
 function log(line) { const t = new Date().toLocaleTimeString("el-GR"); $("log").textContent = `${t}  ${line}\n` + $("log").textContent.slice(0, 20000); }
 function conn(state, text) { const c = $("conn"); c.dataset.state = state; $("connText").textContent = text; }
 function toast(text) { const t = $("toast"); t.textContent = text; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), 3400); }
-function send(frames, what) { if (!live()) return; for (const f of frames) output.send(f); log(`→ ${what} ${hexs(frames[0]).slice(0, 64)}…`); }
-function sendMidi(msgs, what) { if (!live()) return; for (const m of msgs) output.send(m); log(`→ ${what} ${msgs.map(hexs).join(" ")}`); }
+// Web MIDI shims (e.g. the iOS "Web MIDI Browser") differ from Chrome: port maps may not be iterable and send() may
+// want a plain array. portsOf() accepts a Map, an iterator, a forEach-able or a plain object; sends use Array.from.
+function portsOf(m) {
+  if (!m) return [];
+  if (typeof m.values === "function") {
+    const v = m.values();
+    if (v && typeof v[Symbol.iterator] === "function") return [...v];
+    if (v && typeof v.next === "function") { const out = []; for (let r = v.next(); !r.done; r = v.next()) out.push(r.value); return out; }
+  }
+  if (typeof m.forEach === "function") { const out = []; m.forEach((p) => out.push(p)); return out; }
+  return Object.values(m).filter((p) => p && typeof p === "object" && "name" in p);
+}
+const out = (bytes) => output.send(Array.from(bytes));
+function send(frames, what) { if (!live()) return; for (const f of frames) out(f); log(`→ ${what} ${hexs(frames[0]).slice(0, 64)}…`); }
+function sendMidi(msgs, what) { if (!live()) return; for (const m of msgs) out(m); log(`→ ${what} ${msgs.map(hexs).join(" ")}`); }
 const needLive = () => { if (!editing()) { toast("Άνοιξε το Live για να ελέγξεις το πετάλι."); return false; } return true; };
 
 // ---------- parameter changes ----------
@@ -414,25 +427,28 @@ function onMessage(m) {
 }
 function attach() {
   input = output = null;
-  for (const i of midi.inputs.values()) if (/ampero/i.test(i.name)) input = i;
-  for (const o of midi.outputs.values()) if (/ampero/i.test(o.name)) output = o;
+  const ins = portsOf(midi.inputs), outs = portsOf(midi.outputs);
+  for (const i of ins) if (/ampero/i.test(i.name || "")) input = i;
+  for (const o of outs) if (/ampero/i.test(o.name || "")) output = o;
   if (input) input.onmidimessage = (e) => { for (const m of rx.push(e.data)) onMessage(m); };
   const ok = !!(input && output);
   $("read").disabled = !ok; $("refresh").disabled = !ok;
   conn(ok ? "ok" : "off", ok ? "Συνδεδεμένο" : "Δεν βρέθηκε");
   $("connectHint").textContent = ok ? `Βρέθηκε: ${output.name}. Πάτα «Διάβασε το preset».` : "Το Ampero δεν βρέθηκε. Σύνδεσε το καλώδιο USB-C και ξαναπάτα «Σύνδεση».";
-  log("ports: in=" + [...midi.inputs.values()].map((x) => x.name).join(", ") + " | out=" + [...midi.outputs.values()].map((x) => x.name).join(", "));
+  log("ports: in=" + ins.map((x) => x.name).join(", ") + " | out=" + outs.map((x) => x.name).join(", "));
 }
 $("connect").addEventListener("click", async () => {
   if (!navigator.requestMIDIAccess) { $("connectHint").textContent = "Αυτός ο browser δεν έχει Web MIDI. Στο iPhone άνοιξε τη σελίδα από την εφαρμογή «Web MIDI Browser»."; return; }
-  try { midi = await navigator.requestMIDIAccess({ sysex: true }); midi.onstatechange = attach; attach(); }
-  catch (e) { $("connectHint").textContent = "Δεν δόθηκε άδεια για MIDI (SysEx): " + e.message; log("requestMIDIAccess: " + e); }
+  try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
+  catch (e) { $("connectHint").textContent = "Δεν δόθηκε άδεια για MIDI (SysEx): " + e.message; log("requestMIDIAccess: " + e); return; }
+  try { midi.onstatechange = attach; attach(); }
+  catch (e) { $("connectHint").textContent = "Η άδεια δόθηκε, αλλά οι θύρες MIDI δεν διαβάστηκαν: " + e.message; log("ports: " + (e.stack || e)); }
 });
 function readPreset() {
   if (!output) return;
   const frames = readPresetFrames(); // throws unless identical to the proven read request
   $("read").disabled = true; $("refresh").disabled = true; conn("busy", "Ανάγνωση…");
-  for (const f of frames) { output.send(f); log("→ read current preset " + hexs(f)); }
+  for (const f of frames) { out(f); log("→ read current preset " + hexs(f)); }
   clearTimeout(waiting);
   waiting = setTimeout(() => { waiting = null; $("read").disabled = false; $("refresh").disabled = false; conn("ok", "Συνδεδεμένο"); toast("Δεν ήρθε απάντηση σε 4 δευτερόλεπτα. Δοκίμασε ξανά."); }, 4000);
 }
