@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"><title>edit simulation</title>
+<style>body{margin:0;background:#888}iframe{width:430px;height:2000px;border:0;display:block}</style>
+<iframe id="f" src="../index.html?demo&slot=4&edit"></iframe>
+<script>
+// Demo-mode check of editing (nothing is sent): select Para EQ band 2, drag it up/right, then drag its right Q wing inwards.
+const f = document.getElementById("f");
+f.onload = () => setTimeout(() => {
+  const d = f.contentDocument, w = f.contentWindow, vis = d.querySelector(".visual");
+  const centre = (el) => { const r = el.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; };
+  const drag = (sel, dx, dy) => { const el = d.querySelector(sel), [x, y] = centre(el), P = (t, X, Y) => new w.PointerEvent(t, { bubbles: true, clientX: X, clientY: Y, pointerId: 1 });
+    el.dispatchEvent(P("pointerdown", x, y)); vis.dispatchEvent(P("pointermove", x + dx / 2, y + dy / 2)); vis.dispatchEvent(P("pointermove", x + dx, y + dy)); vis.dispatchEvent(P("pointerup", x + dx, y + dy)); };
+  drag('.h[data-band="2"] circle:nth-of-type(2)', 40, -60);
+  setTimeout(() => { drag('.wing[data-wing="hi"] rect', -18, 0); document.title = "done"; }, 300);
+}, 1500);
+</script>

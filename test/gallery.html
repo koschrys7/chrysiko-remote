@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Chrysiko Remote · gallery</title>
+<style>body{margin:0;padding:16px;background:#f6f3ee;font:14px system-ui}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+figure{margin:0;background:#fff;border-radius:12px;padding:10px}figcaption{font-weight:700;margin-bottom:6px}svg{width:100%;height:auto}
+svg .cap{font:800 10px "Avenir Next",Avenir,Arial,sans-serif}svg .name{font-family:"Avenir Next",Avenir,Arial,sans-serif;font-weight:800}svg .word,svg .script{font-family:Georgia,serif;font-weight:700}svg .script{font-style:italic}</style>
+<div class="g" id="g"></div>
+<script type="module">
+// Renders one model of each kind from the catalogue with mid-range values, for visual checks only.
+import { CATALOG } from "../catalog.js";
+import { pedalSVG, ampSVG, cabSVG, eqSVG, kindOf } from "../views.js";
+const want = [[3, "Tube Screamer"], [3, null], [4, null], [5, null], [6, null], [9, null], [8, "Para EQ 2"], [8, "Guitar EQ 1"], [0, null], [2, null]];
+for (const [cat, name] of want) {
+  const c = CATALOG[cat], entry = Object.entries(c.algs).find(([, a]) => !name || a[0] === name) || Object.entries(c.algs)[0];
+  const [code, [model, ps]] = entry, params = ps.map(([n, id, lo, hi, type]) => ({ name: n, id, min: lo, max: hi, type }));
+  const values = Array(25).fill(0); params.forEach((q, i) => (values[q.id] = q.min + (q.max - q.min) * ((i * 0.23 + 0.3) % 1)));
+  const b = { category: cat, code: +code, module: c.module, model, params, scenes: [{ enabled: true, values }] }, sc = b.scenes[0], k = kindOf(b);
+  const f = document.createElement("figure"); f.innerHTML = `<figcaption>${c.module} · ${model}</figcaption>` + (k === "eq" ? eqSVG(b, sc).svg : k === "amp" ? ampSVG(b, sc) : k === "cab" ? cabSVG(b, sc) : pedalSVG(b, sc));
+  document.getElementById("g").append(f);
+}
+</script>

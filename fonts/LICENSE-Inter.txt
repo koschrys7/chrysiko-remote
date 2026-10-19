@@ -1,0 +1,2 @@
+Inter is © The Inter Project Authors (https://github.com/rsms/inter), licensed under the SIL Open Font License 1.1
+(https://openfontlicense.org). Files: Inter variable (opsz 14–32, wght 300–700), latin and greek subsets, from Google Fonts v20.
